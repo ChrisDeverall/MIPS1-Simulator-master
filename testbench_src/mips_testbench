@@ -1,0 +1,109 @@
+#!/bin/bash
+
+clear
+srcPath="tests"
+outPath="$srcPath/output.csv"
+outTxt=""
+simPath=$1
+warnings=()
+failures=()
+
+run_test()
+{
+    binFile="$2"
+    fileName=$(basename "$binFile")
+    fileName="${fileName%%.*}"
+    metaFile="${binFile%.*}.meta"
+    testID=${fileName// /-}
+
+    if [ -f "$metaFile" ]; then
+        metaData=()
+        while read -r line  || [[ -n "$line" ]]; do
+            metaData+=("${line//#}")
+        done < "$metaFile"
+
+        testInstr=${metaData[0]}
+        expectedReturn=${metaData[1]}
+        author=${metaData[2]}
+        extraInfo=${metaData[3]}
+        input=${metaData[4]}
+        expectedOutput=${metaData[5]}
+
+        if [ -f "$input" ]; then
+            simOutput=$(cat "$input" | "$simPath" "$binFile")
+        else
+            simOutput=$(echo "$input" | "$simPath" "$binFile")
+        fi
+
+        return=$?
+        if [ $return -ge 128 ]; then
+            ((return-=256))
+        fi
+
+        message="exit code $return"
+
+        if [ ! "$extraInfo" = "" ]; then
+            message="$extraInfo; $message"
+        fi
+
+        if ((return != expectedReturn)); then
+            status="Fail"
+            message+=" (expected $expectedReturn)"
+
+            failure="test case '$testID' failed: $message"
+            failures+=("$failure")
+
+            echo "FAIL: $failure" >&2
+        else
+            if [ ! "$simOutput" = "$expectedOutput" ]; then
+                status="Fail"
+                message+=" (expected '$expectedOutput' as the output; instead received '$simOutput')"
+
+                failure="test case '$testID' failed: $message"
+                failures+=("$failure")
+
+                echo "FAIL: $failure" >&2
+            else
+                status="Pass"
+            fi
+        fi
+
+        outTxt="$outTxt$testID, $testInstr, $status, $author, $message\n"
+    else
+        warning="test case '$testID' did not have a corresponding .meta file and could not be performed"
+        warnings+=("$warning")
+
+        echo "WARNING: $warning" >&2
+    fi
+}
+
+binFiles="./$srcPath/*.bin"
+for bin in $binFiles
+do
+    run_test "$1" "$bin"
+done
+
+mkdir -p $outDir
+echo >&2
+printf "$outTxt" > $outPath
+printf "$outTxt"
+
+warningCount=${#warnings[@]}
+if [ $warningCount -ge 1 ]; then
+    printf "\n\n$warningCount warnings were encountered\n" >&2
+    for warning in "${warnings[@]}"
+    do
+        echo " - $warning" >&2
+    done
+fi
+
+failureCount=${#failures[@]}
+if [ $failureCount -ge 1 ]; then
+printf "\n\n$failureCount failures were encountered\n" >&2
+for failure in "${failures[@]}"
+    do
+        echo " - $failure" >&2
+    done
+fi
+
+echo
